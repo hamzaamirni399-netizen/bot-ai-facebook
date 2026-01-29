@@ -114,7 +114,16 @@ app.get('/webhook', (req, res) => {
 app.post('/webhook', (req, res) => {
     if (req.body.object === 'page') {
         req.body.entry.forEach(entry => {
-            if (entry.messaging) handleMessage(entry.messaging[0].sender.id, entry.messaging[0].message);
+            if (entry.messaging) {
+                const event = entry.messaging[0];
+                const senderId = event.sender.id;
+                if (event.message) {
+                    handleMessage(senderId, event.message);
+                } else if (event.postback) {
+                    // Handle buttons by simulating a message with the payload text
+                    handleMessage(senderId, { text: event.postback.payload });
+                }
+            }
         });
         res.status(200).send('EVENT_RECEIVED');
     } else { res.sendStatus(404); }
@@ -201,8 +210,83 @@ async function handleMessage(sender_psid, received_message) {
         const prompt = args.join(' ');
         if (!prompt) return callSendAPI(sender_psid, { text: "Send a description! Example: .imagine cat" });
         callSendAPI(sender_psid, { text: "🎨 Making your art..." });
-        const imgUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?nologo=true&enhance=true`;
-        return sendAttachmentAPI(sender_psid, 'image', imgUrl, `✅ ${prompt}`);
+        const imgUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?nologo=true&enhance=true&seed=${Math.floor(Math.random() * 1000000)}&type=.jpg`;
+
+        return callSendAPI(sender_psid, {
+            attachment: {
+                type: "template",
+                payload: {
+                    template_type: "generic",
+                    elements: [
+                        {
+                            title: `✨ Generated Art: ${prompt}`,
+                            image_url: imgUrl,
+                            subtitle: `Created for you by ${OWNER_NAME}`,
+                            buttons: [
+                                {
+                                    type: "web_url",
+                                    url: imgUrl,
+                                    title: "📥 Download / View HD"
+                                },
+                                {
+                                    type: "postback",
+                                    title: "🔄 Regenerate",
+                                    payload: `.imagine ${prompt}`
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        });
+    }
+
+    // --- YTS (YouTube Search Carousel) ---
+    if (command === 'yts' || command === 'ytsearch') {
+        const query = args.join(' ');
+        if (!query) return callSendAPI(sender_psid, { text: "Usage: .yts [song/video name]" });
+        callSendAPI(sender_psid, { text: `🔍 Searching YouTube for: "${query}"...` });
+        try {
+            const results = await yts(query);
+            const videos = results.videos.slice(0, 7);
+            if (videos.length === 0) return callSendAPI(sender_psid, { text: "❌ No results found on YouTube." });
+
+            const elements = videos.map(v => ({
+                title: v.title,
+                image_url: v.thumbnail,
+                subtitle: `Channel: ${v.author.name} | Duration: ${v.timestamp}`,
+                buttons: [
+                    { type: "web_url", url: v.url, title: "📺 Watch" },
+                    { type: "postback", title: "🎵 MP3", payload: `.ytmp3 ${v.url}` },
+                    { type: "postback", title: "🎬 MP4", payload: `.ytmp4 ${v.url}` }
+                ]
+            }));
+
+            return callSendAPI(sender_psid, {
+                attachment: {
+                    type: "template",
+                    payload: {
+                        template_type: "generic",
+                        elements: elements
+                    }
+                }
+            });
+        } catch (e) {
+            return callSendAPI(sender_psid, { text: "❌ Search Error. Try again later." });
+        }
+    }
+
+    // --- YT DOWNLOADERS (MP3 & MP4) ---
+    if (command === 'ytmp3' || command === 'ytmp4') {
+        const url = args[0];
+        if (!url) return callSendAPI(sender_psid, { text: `Usage: .${command} [YouTube Link]` });
+        const format = command === 'ytmp3' ? 'mp3' : '720';
+        callSendAPI(sender_psid, { text: `⏳ Analyzing Link... Please wait.` });
+        const res = await savetube.download(url, format);
+        if (res.status) {
+            return sendAttachmentAPI(sender_psid, command === 'ytmp3' ? 'audio' : 'video', res.result.download, `✅ *${res.result.title}*\nBy ${OWNER_NAME}`);
+        }
+        return callSendAPI(sender_psid, { text: "❌ Error: Could not process this video. Try another link." });
     }
 
     // --- RIWAYA (LIST MODE) ---
@@ -241,12 +325,22 @@ function callSendAPI(sender_psid, response) {
 
 async function sendAttachmentAPI(sender_psid, type, url, caption) {
     try {
+        const attachmentType = type === 'audio' ? 'audio' : (type === 'video' ? 'video' : 'image');
         await axios.post(`https://graph.facebook.com/v19.0/me/messages?access_token=${config.PAGE_ACCESS_TOKEN}`, {
             recipient: { id: sender_psid },
-            message: { attachment: { type: type === 'audio' ? 'audio' : (type === 'video' ? 'video' : 'image'), payload: { url, is_selectable: true } } }
+            message: {
+                attachment: {
+                    type: attachmentType,
+                    payload: {
+                        url: url,
+                        is_reusable: true
+                    }
+                }
+            }
         });
         if (caption) await callSendAPI(sender_psid, { text: caption });
     } catch (e) {
+        console.error(chalk.red(`[ERROR] sendAttachmentAPI: ${e.response?.data?.error?.message || e.message}`));
         return callSendAPI(sender_psid, { text: `${caption}\n\n🔗 Direct Link:\n${url}` });
     }
 }
