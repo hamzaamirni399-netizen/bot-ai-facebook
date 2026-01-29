@@ -12,7 +12,7 @@ const app = express().use(bodyParser.json());
 
 const systemPromptText = `You are ${config.botName}, a sophisticated AI assistant created and developed by **Hamza Amirni** (حمزة اعمرني).
 - If someone asks who you are, say you are a smart assistant developed by Hamza Amirni.
-- You respond fluently in: Moroccan Darija (الدارجة المغربية), Standard Arabic (العربية الفصحى), English, and French.
+- You respond fluently in: Moroccan Darija (الدارجة الموروكية), Standard Arabic (العربية الفصحى), English, and French.
 - Responsably, you are friendly, helpful, and professional.
 - ALWAYS respond in the SAME language the user uses.
 - Focus on showcasing Hamza's skills as a developer of bots and websites.`;
@@ -81,6 +81,13 @@ async function getGeminiResponse(senderId, text, imageUrl = null) {
     } catch (e) { return null; }
 }
 
+async function getShortStory() {
+    try {
+        const { data } = await axios.get("https://api.maher-zubair.tech/ai/chatgpt?q=tell me a very short interesting story in Arabic", { timeout: 10000 });
+        return data.result || "Sma7 lya, ma9dertch n-jib chi riwaya f had l-we9t.";
+    } catch (e) { return "Sma7 lya, wa9e3 mochkil f l-api dyal riwayat."; }
+}
+
 // --- WEBHOOK LOGIC ---
 app.get('/webhook', (req, res) => {
     if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === config.VERIFY_TOKEN) {
@@ -109,7 +116,7 @@ async function handleMessage(sender_psid, received_message) {
     console.log(chalk.blue(`[MSG] ${sender_psid}: ${text}`));
     sendTypingAction(sender_psid, 'typing_on');
 
-    // 1. Automatic Link Detection
+    // 1. Automatic YouTube Link Detection
     const ytPattern = /(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/))([a-zA-Z0-9_-]{11})/;
     if (ytPattern.test(text)) {
         callSendAPI(sender_psid, { text: "🔗 I detected a YouTube link! Generating download link for you..." });
@@ -119,22 +126,27 @@ async function handleMessage(sender_psid, received_message) {
         }
     }
 
-    const command = text.toLowerCase().split(' ')[0];
+    const args = text.split(' ');
+    const command = args[0].toLowerCase();
 
     // 2. Commands
     if (['.menu', '.help', 'الاوامر', 'menu'].includes(command)) {
         const menu = `🌟 *WELCOME TO ${config.botName.toUpperCase()}* 🌟\n\n` +
-            `👨‍💻 *Developer:* ${config.ownerName}\n` +
-            `🔹 I can chat with you in Darija, Arabic, English & French.\n` +
-            `🔹 Just send an image, and I will analyze it.\n\n` +
+            `👨‍💻 *Developer:* ${config.ownerName}\n\n` +
             `🚀 *Available Commands:*\n` +
             `✨ *.yts [name]* : Search YouTube\n` +
             `🎵 *.ytmp3 [url]* : Download Audio\n` +
             `🎬 *.ytmp4 [url]* : Download Video\n` +
+            `📖 *.riwaya* : Get a random story (Arabic)\n` +
             `👤 *.owner* : Developer social links\n` +
             `💻 *.services* : My developer services\n\n` +
-            `📥 *AUTO-DOWNLOAD:* Just send any YouTube link and I'll handle it!`;
+            `📥 *AUTO-DOWNLOAD:* Just send any YouTube link!`;
         return callSendAPI(sender_psid, { text: menu });
+    }
+
+    if (command === '.riwaya' || command === 'رواية' || command === 'قصة') {
+        const story = await getShortStory();
+        return callSendAPI(sender_psid, { text: `📖 *Riwaya:* \n\n${story}` });
     }
 
     if (command === '.owner' || command === 'المطور') {
@@ -159,7 +171,7 @@ async function handleMessage(sender_psid, received_message) {
     }
 
     if (command === '.yts') {
-        const query = text.split(' ').slice(1).join(' ');
+        const query = args.slice(1).join(' ');
         if (!query) return callSendAPI(sender_psid, { text: "Usage: .yts [video name]" });
         try {
             const { videos } = await yts(query);
@@ -167,6 +179,19 @@ async function handleMessage(sender_psid, received_message) {
             videos.slice(0, 5).forEach((v, i) => res += `${i + 1}. *${v.title}*\n🔗 ${v.url}\n\n`);
             return callSendAPI(sender_psid, { text: res });
         } catch (e) { return callSendAPI(sender_psid, { text: "Error searching YouTube." }); }
+    }
+
+    if (command === '.ytmp3' || command === '.ytmp4') {
+        const url = args[1];
+        if (!url) return callSendAPI(sender_psid, { text: `Usage: ${command} [url]` });
+        const format = command === '.ytmp3' ? 'mp3' : '720';
+        try {
+            callSendAPI(sender_psid, { text: "⏳ Processing your request..." });
+            const res = await savetube.download(url, format);
+            if (res.status) {
+                return callSendAPI(sender_psid, { text: `✅ *${res.result.title}*\n\n🔗 Download Link:\n${res.result.download}` });
+            } else { return callSendAPI(sender_psid, { text: "❌ Failed: " + res.error }); }
+        } catch (e) { return callSendAPI(sender_psid, { text: "Error downloading video." }); }
     }
 
     // 3. AI Fallback (Identifies as Hamza Amirni Bot)
