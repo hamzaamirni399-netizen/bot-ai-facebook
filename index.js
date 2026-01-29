@@ -12,10 +12,10 @@ const app = express().use(bodyParser.json());
 
 const systemPromptText = `You are ${config.botName}, a sophisticated AI assistant created and developed by **Hamza Amirni** (حمزة اعمرني).
 - If someone asks who you are, say you are a smart assistant developed by Hamza Amirni.
-- You respond fluently in: Moroccan Darija (الدارجة الموروكية), Standard Arabic (العربية الفصحى), English, and French.
+- You respond fluently in: Moroccan Darija (الدارجة المغربية), Standard Arabic (العربية الفصحى), English, and French.
 - Responsably, you are friendly, helpful, and professional.
 - ALWAYS respond in the SAME language the user uses.
-- Focus on showcasing Hamza's skills as a developer of bots and websites.`;
+- Showcase Hamza's skills as a developer of bots and websites.`;
 
 // --- SAVETUBE LOGIC ---
 const savetube = {
@@ -81,11 +81,11 @@ async function getGeminiResponse(senderId, text, imageUrl = null) {
     } catch (e) { return null; }
 }
 
-async function getShortStory() {
+async function generateImage(prompt) {
     try {
-        const { data } = await axios.get("https://api.maher-zubair.tech/ai/chatgpt?q=tell me a very short interesting story in Arabic", { timeout: 10000 });
-        return data.result || "Sma7 lya, ma9dertch n-jib chi riwaya f had l-we9t.";
-    } catch (e) { return "Sma7 lya, wa9e3 mochkil f l-api dyal riwayat."; }
+        const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?nologo=true&enhance=true`;
+        return url;
+    } catch (e) { return null; }
 }
 
 // --- WEBHOOK LOGIC ---
@@ -110,7 +110,6 @@ async function handleMessage(sender_psid, received_message) {
     let imageUrl = null;
     if (received_message.attachments && received_message.attachments[0].type === 'image') {
         imageUrl = received_message.attachments[0].payload.url;
-        if (!text) text = "Analyze this image";
     }
 
     console.log(chalk.blue(`[MSG] ${sender_psid}: ${text}`));
@@ -119,10 +118,10 @@ async function handleMessage(sender_psid, received_message) {
     // 1. Automatic YouTube Link Detection
     const ytPattern = /(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/))([a-zA-Z0-9_-]{11})/;
     if (ytPattern.test(text)) {
-        callSendAPI(sender_psid, { text: "🔗 I detected a YouTube link! Generating download link for you..." });
+        callSendAPI(sender_psid, { text: "🔗 YouTube link detected! Getting it for you..." });
         const res = await savetube.download(text, '720');
         if (res.status) {
-            return callSendAPI(sender_psid, { text: `✅ *${res.result.title}*\n\n🎬 Video Link:\n${res.result.download}\n\n*Developed by حمزة اعمرني*` });
+            return callSendAPI(sender_psid, { text: `✅ *${res.result.title}*\n\n🎬 Video Link:\n${res.result.download}\n\n*By Hamza Amirni*` });
         }
     }
 
@@ -131,72 +130,123 @@ async function handleMessage(sender_psid, received_message) {
 
     // 2. Commands
     if (['.menu', '.help', 'الاوامر', 'menu'].includes(command)) {
-        const menu = `🌟 *WELCOME TO ${config.botName.toUpperCase()}* 🌟\n\n` +
+        const menu = `🌟 *${config.botName.toUpperCase()} PREMIUM MENU* 🌟\n\n` +
             `👨‍💻 *Developer:* ${config.ownerName}\n\n` +
-            `🚀 *Available Commands:*\n` +
+            `�️ *AI IMAGE GENERATION:*\n` +
+            `🎨 *.imagine [prompt]* : Create AI image\n\n` +
+            `�️ *DOWNLOADER:*\n` +
             `✨ *.yts [name]* : Search YouTube\n` +
-            `🎵 *.ytmp3 [url]* : Download Audio\n` +
-            `🎬 *.ytmp4 [url]* : Download Video\n` +
-            `📖 *.riwaya* : Get a random story (Arabic)\n` +
-            `👤 *.owner* : Developer social links\n` +
-            `💻 *.services* : My developer services\n\n` +
-            `📥 *AUTO-DOWNLOAD:* Just send any YouTube link!`;
+            `🎵 *.ytmp3 [url]* : YouTube Audio\n` +
+            `🎬 *.ytmp4 [url]* : YouTube Video\n\n` +
+            `� *RELIGION & CONTENT:*\n` +
+            `🕌 *.quran [1-114]* : Quran Audio\n` +
+            `📚 *.riwaya* : Random Short Story\n` +
+            `🕋 *.adhkar* : Random Adhkar\n\n` +
+            `� *SEARCH & UTILS:*\n` +
+            `🌐 *.wiki [query]* : Wikipedia Info\n` +
+            `🌍 *.tr [lang] [text]* : Translate\n` +
+            `🌦️ *.weather [city]* : Current Weather\n\n` +
+            `👤 *OWNER:* \n` +
+            `👤 *.owner* : Social links\n` +
+            `💻 *.services* : Hamza's Services\n\n` +
+            `🛠️ *Developed for you by Hamza Amirni*`;
         return callSendAPI(sender_psid, { text: menu });
     }
 
-    if (command === '.riwaya' || command === 'رواية' || command === 'قصة') {
-        const story = await getShortStory();
-        return callSendAPI(sender_psid, { text: `📖 *Riwaya:* \n\n${story}` });
+    if (command === '.imagine') {
+        const prompt = args.slice(1).join(' ');
+        if (!prompt) return callSendAPI(sender_psid, { text: "Usage: .imagine [description]" });
+        callSendAPI(sender_psid, { text: "🎨 Generating your artistic request..." });
+        const imgUrl = await generateImage(prompt);
+        if (imgUrl) {
+            return callSendAPI(sender_psid, { text: `✅ *Result for:* ${prompt}\n\n🔗 View/Download:\n${imgUrl}` });
+        } else { return callSendAPI(sender_psid, { text: "❌ Error generating image." }); }
     }
 
-    if (command === '.owner' || command === 'المطور') {
-        const ownerInfo = `👤 *DEVELOPER INFORMATION* 👤\n\n` +
-            `👨‍💻 *Name:* حمزة اعمرني (Hamza Amirni)\n\n` +
-            `🔗 *Connect with me:*\n` +
-            `📸 *Instagram:* ${config.social.instagram}\n` +
-            `📺 *YouTube:* ${config.social.youtube}\n` +
-            `✈️ *Telegram:* ${config.social.telegram}\n` +
-            `💼 *Portfolio:* ${config.social.portfolio}\n` +
-            `💬 *WhatsApp:* ${config.social.whatsapp}\n\n` +
-            `Feel free to follow and subscribe! ✨`;
-        return callSendAPI(sender_psid, { text: ownerInfo });
+    if (command === '.wiki') {
+        const query = args.slice(1).join(' ');
+        if (!query) return callSendAPI(sender_psid, { text: "Usage: .wiki [search term]" });
+        try {
+            const { data } = await axios.get(`https://api.maher-zubair.tech/search/wikipedia?q=${encodeURIComponent(query)}`);
+            if (data.status === 200) {
+                return callSendAPI(sender_psid, { text: `🌐 *Wikipedia: ${query}*\n\n${data.result.content}` });
+            }
+        } catch (e) { return callSendAPI(sender_psid, { text: "No Wikipedia entry found." }); }
     }
 
-    if (command === '.services' || command === 'خدمات') {
-        const services = `💻 *HAMZA AMIRNI SERVICES* 💻\n\n` +
-            `Looking for a professional developer? Here is what I offer:\n\n` +
-            config.services.map(s => `✔️ ${s}`).join('\n') + `\n\n` +
-            `📩 *Contact me for orders:* ${config.social.whatsapp}`;
-        return callSendAPI(sender_psid, { text: services });
+    if (command === '.tr') {
+        const lang = args[1];
+        const toTranslate = args.slice(2).join(' ');
+        if (!lang || !toTranslate) return callSendAPI(sender_psid, { text: "Usage: .tr [lang_code] [text]. Example: .tr ar Hello" });
+        try {
+            const { data } = await axios.get(`https://api.maher-zubair.tech/tools/translate?text=${encodeURIComponent(toTranslate)}&to=${lang}`);
+            if (data.status === 200) {
+                return callSendAPI(sender_psid, { text: `🌍 *Translation (${lang}):*\n\n${data.result}` });
+            }
+        } catch (e) { return callSendAPI(sender_psid, { text: "Translation failed." }); }
+    }
+
+    if (command === '.weather') {
+        const city = args.slice(1).join(' ');
+        if (!city) return callSendAPI(sender_psid, { text: "Usage: .weather [city]" });
+        try {
+            const { data } = await axios.get(`https://api.maher-zubair.tech/details/weather?q=${encodeURIComponent(city)}`);
+            if (data.status === 200) {
+                const w = data.result;
+                return callSendAPI(sender_psid, { text: `🌦️ *Weather in ${city}:*\n\n🌡️ Temp: ${w.temperature}\n💧 Humidity: ${w.humidity}\n🌬️ Wind: ${w.wind}\n📝 Desc: ${w.description}` });
+            }
+        } catch (e) { return callSendAPI(sender_psid, { text: "City not found." }); }
+    }
+
+    if (command === '.adhkar') {
+        try {
+            const { data } = await axios.get("https://api.maher-zubair.tech/details/adhkar");
+            if (data.status === 200) {
+                return callSendAPI(sender_psid, { text: `🕋 *Adhkar:*\n\n${data.result.arabic}\n\n_Ref: ${data.result.reference}_` });
+            }
+        } catch (e) { return callSendAPI(sender_psid, { text: "Error getting Adhkar." }); }
+    }
+
+    if (command === '.riwaya') {
+        const { data } = await axios.get("https://api.maher-zubair.tech/ai/chatgpt?q=tell me a very short interesting story in Arabic");
+        return callSendAPI(sender_psid, { text: `📖 *Story:* \n\n${data.result || "Error"}` });
+    }
+
+    if (command === '.quran') {
+        const surahNum = args[1];
+        if (!surahNum || isNaN(surahNum) || surahNum < 1 || surahNum > 114) return callSendAPI(sender_psid, { text: "Usage: .quran [1-114]" });
+        return callSendAPI(sender_psid, { text: `🕌 *Quran Surah ${surahNum}*\n\n🔗 Audio:\nhttps://cdn.islamic.network/quran/audio-surah/128/ar.alafasy/${surahNum}.mp3` });
+    }
+
+    if (command === '.owner') {
+        return callSendAPI(sender_psid, { text: `� *DEVELOPER:* ${config.ownerName}\n\n📸 Instagram: ${config.social.instagram}\n📺 YouTube: ${config.social.youtube}\n💼 Portfolio: ${config.social.portfolio}\n💬 WhatsApp: ${config.social.whatsapp}` });
+    }
+
+    if (command === '.services') {
+        return callSendAPI(sender_psid, { text: `💻 *HAMZA AMIRNI SERVICES:*\n\n` + config.services.map(s => `✔️ ${s}`).join('\n') + `\n\n📩 WhatsApp: ${config.social.whatsapp}` });
     }
 
     if (command === '.yts') {
         const query = args.slice(1).join(' ');
-        if (!query) return callSendAPI(sender_psid, { text: "Usage: .yts [video name]" });
-        try {
-            const { videos } = await yts(query);
-            let res = `🎥 *YouTube Search Results:* ${query}\n\n`;
-            videos.slice(0, 5).forEach((v, i) => res += `${i + 1}. *${v.title}*\n🔗 ${v.url}\n\n`);
-            return callSendAPI(sender_psid, { text: res });
-        } catch (e) { return callSendAPI(sender_psid, { text: "Error searching YouTube." }); }
+        if (!query) return callSendAPI(sender_psid, { text: "Usage: .yts [name]" });
+        const { videos } = await yts(query);
+        let res = `🎥 *YouTube Search:* ${query}\n\n`;
+        videos.slice(0, 5).forEach((v, i) => res += `${i + 1}. *${v.title}*\n🔗 ${v.url}\n\n`);
+        return callSendAPI(sender_psid, { text: res });
     }
 
     if (command === '.ytmp3' || command === '.ytmp4') {
         const url = args[1];
         if (!url) return callSendAPI(sender_psid, { text: `Usage: ${command} [url]` });
-        const format = command === '.ytmp3' ? 'mp3' : '720';
-        try {
-            callSendAPI(sender_psid, { text: "⏳ Processing your request..." });
-            const res = await savetube.download(url, format);
-            if (res.status) {
-                return callSendAPI(sender_psid, { text: `✅ *${res.result.title}*\n\n🔗 Download Link:\n${res.result.download}` });
-            } else { return callSendAPI(sender_psid, { text: "❌ Failed: " + res.error }); }
-        } catch (e) { return callSendAPI(sender_psid, { text: "Error downloading video." }); }
+        const res = await savetube.download(url, command === '.ytmp3' ? 'mp3' : '720');
+        if (res.status) {
+            return callSendAPI(sender_psid, { text: `✅ *${res.result.title}*\n\n🔗 Link:\n${res.result.download}` });
+        } else { return callSendAPI(sender_psid, { text: "❌ Failed." }); }
     }
 
     // 3. AI Fallback (Identifies as Hamza Amirni Bot)
     let aiReply = imageUrl ? await getGeminiResponse(sender_psid, text, imageUrl) : (await getLuminAIResponse(sender_psid, text) || await getHectormanuelAI(sender_psid, text));
-    if (!aiReply) aiReply = imageUrl ? "Sma7 lya, Gemini API key is missing." : "Afwan, ma9dertch njawb f had l-we9t.";
+    if (!aiReply) aiReply = imageUrl ? "Gemini Key Missing." : "Sorry, I can't reply right now.";
 
     sendTypingAction(sender_psid, 'typing_off');
     callSendAPI(sender_psid, { text: aiReply });
