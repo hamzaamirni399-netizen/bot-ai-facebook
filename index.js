@@ -69,6 +69,31 @@ async function getLuminAIResponse(senderId, message) {
     }
 }
 
+async function getAIDEVResponse(message) {
+    try {
+        const { data } = await axios.get(
+            `https://api.maher-zubair.tech/ai/chatgpt?q=${encodeURIComponent(message)}`,
+            { timeout: 12000 }
+        );
+        return data.result || null;
+    } catch (error) {
+        return null;
+    }
+}
+
+async function getPollinationsResponse(message) {
+    try {
+        const { data } = await axios.post("https://text.pollinations.ai/openai", {
+            messages: [{ role: "system", content: systemPromptText }, { role: "user", content: message }],
+            model: "openai",
+            seed: Math.floor(Math.random() * 1000000),
+        }, { timeout: 15000 });
+        return data.choices?.[0]?.message?.content || (typeof data === "string" ? data : null);
+    } catch (error) {
+        return null;
+    }
+}
+
 // --- KEEP-ALIVE SYSTEM ---
 
 app.get('/', (req, res) => {
@@ -146,7 +171,7 @@ async function handleMessage(sender_psid, received_message) {
 
     console.log(chalk.blue(`[FB-BOT] Message from ${sender_psid}: ${text}`));
 
-    // 1. Check for YouTube search command
+    // 1. YouTube Search
     if (text.toLowerCase().startsWith(".yts") || text.toLowerCase().startsWith("يتس")) {
         const query = text.split(" ").slice(1).join(" ");
         if (!query) return callSendAPI(sender_psid, { text: "Goulli chnou n9elleb 3lih f YouTube? Mital: .yts song name" });
@@ -154,26 +179,29 @@ async function handleMessage(sender_psid, received_message) {
         try {
             const search = await yts(query);
             const videos = search.videos.slice(0, 5);
-            let resultText = `🎥 *YouTube Search Results for:* ${query}\n\n`;
+            let resultText = `🎥 *Results for:* ${query}\n\n`;
             videos.forEach((v, i) => {
-                resultText += `${i + 1}. *${v.title}*\n🔗 ${v.url}\n⏱️ ${v.timestamp} | 📅 ${v.ago}\n\n`;
+                resultText += `${i + 1}. *${v.title}*\n🔗 ${v.url}\n\n`;
             });
             return callSendAPI(sender_psid, { text: resultText });
         } catch (e) {
-            return callSendAPI(sender_psid, { text: "Sma7 lya, wa9e3 mochkil f l-ba7t dyal YouTube." });
+            return callSendAPI(sender_psid, { text: "Sma7 lya, wa9e3 mochkil f YouTube." });
         }
     }
 
-    // 2. AI Response (with Vision if image exists)
+    // 2. AI Response
     let aiReply = null;
 
     if (imageUrl) {
-        // Use Gemini for Image Analysis
         aiReply = await getGeminiResponse(sender_psid, text, imageUrl);
-        if (!aiReply) aiReply = "Sma7 lya, ma9dertch n9ra had l-tswira. Jereb mrra okhra!";
+        if (!aiReply) aiReply = "Sma7 lya, ma3ndich Gemini API key bach n9ra l-tsawer. Sift lya ghir message b l-ktiba.";
     } else {
-        // Standard Text AI
-        aiReply = await getHectormanuelAI(sender_psid, text) || await getLuminAIResponse(sender_psid, text);
+        // Text Fallbacks
+        aiReply = await getHectormanuelAI(sender_psid, text, "gpt-4o")
+            || await getHectormanuelAI(sender_psid, text, "gpt-4o-mini")
+            || await getLuminAIResponse(sender_psid, text)
+            || await getAIDEVResponse(text)
+            || await getPollinationsResponse(text);
     }
 
     if (!aiReply) aiReply = "Afwan, ma9dertch njawb 3la had l-message f had l-we9t.";
@@ -188,7 +216,7 @@ function callSendAPI(sender_psid, response) {
     };
 
     axios.post(`https://graph.facebook.com/v19.0/me/messages?access_token=${config.PAGE_ACCESS_TOKEN}`, request_body)
-        .then(() => console.log(chalk.green('Message sent successfully!')))
+        .then(() => console.log(chalk.green('Message sent!')))
         .catch(err => console.error(chalk.red('Unable to send message: ' + (err.response?.data?.error?.message || err.message))));
 }
 
