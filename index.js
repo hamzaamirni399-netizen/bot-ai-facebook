@@ -71,8 +71,12 @@ async function getQuranSurahText(surahInput) {
     try {
         const { data } = await axios.get(`https://api.alquran.cloud/v1/surah/${num}`);
         if (data.code === 200) {
-            let verses = data.data.ayahs.map(a => `${a.text} (${a.numberInSurah})`).join(' ');
-            return `📖 *سورة ${data.data.name}*\n\n${verses}\n\n*صدق الله العظيم*`;
+            let surahName = data.data.name;
+            let ayahs = data.data.ayahs.map(a => `${a.text} ۝ ${a.numberInSurah}`).join(' ');
+            return {
+                title: `📖 *سورة ${surahName}*`,
+                content: ayahs
+            };
         }
     } catch (e) { return null; }
 }
@@ -209,14 +213,25 @@ async function handleMessage(sender_psid, received_message) {
         const surahInput = args.join('').toLowerCase();
         if (!surahInput) return callSendAPI(sender_psid, { text: "Usage: .quran [1-114 or Name]" });
         callSendAPI(sender_psid, { text: "📖 جاري جلب السورة..." });
-        const qText = await getQuranSurahText(surahInput);
-        if (qText) {
-            if (qText.length > 2000) {
-                const parts = qText.match(/[\s\S]{1,1900}/g);
-                for (let part of parts) await callSendAPI(sender_psid, { text: part });
-                return;
+        const qData = await getQuranSurahText(surahInput);
+        if (qData) {
+            await callSendAPI(sender_psid, { text: qData.title });
+
+            // Split by verses to avoid cutting words
+            const verses = qData.content.split(' ۝ ');
+            let currentMessage = "";
+
+            for (let i = 0; i < verses.length; i++) {
+                let verse = verses[i] + (i < verses.length - 1 ? " ۝ " : "");
+                if ((currentMessage + verse).length > 1950) {
+                    await callSendAPI(sender_psid, { text: currentMessage.trim() });
+                    currentMessage = verse;
+                } else {
+                    currentMessage += verse;
+                }
             }
-            return callSendAPI(sender_psid, { text: qText });
+            if (currentMessage) await callSendAPI(sender_psid, { text: currentMessage.trim() });
+            return callSendAPI(sender_psid, { text: "✅ *صدق الله العظيم*" });
         }
         return callSendAPI(sender_psid, { text: "Invalid Surah Name/Number." });
     }
