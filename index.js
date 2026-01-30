@@ -160,8 +160,43 @@ async function handleMessage(sender_psid, received_message) {
         console.log(chalk.blue(`[MSG] ${sender_psid}: ${text}`));
         sendTypingAction(sender_psid, 'typing_on');
 
-        const command = rawText.split(' ')[0].startsWith('.') ? rawText.split(' ')[0].substring(1) : "";
-        const args = text.split(' ').slice(1);
+        let command = rawText.split(' ')[0].startsWith('.') ? rawText.split(' ')[0].substring(1) : "";
+        let args = text.split(' ').slice(1);
+
+        // --- SMART INTENT ROUTER (Natural Language) ---
+        if (!command) {
+            // Music/Audio
+            const musicRegex = /^(play|music|song|أغنية|اغنية|موسيقى|سمعني|خدم|شغل|طلاق)\s+(.+)/i;
+            // Video
+            const videoRegex = /^(video|mp4|فيديو|telecharger|télecharger)\s+(.+)/i;
+            // Quran
+            const quranRegex = /^(quran|koran|قرآن|قران|سورة)\s+(.+)/i;
+            // Imagine/Draw
+            const drawRegex = /^(imagine|draw|image|رسم|ارسم|صورة|تخيل|انشيء)(\s+لي)?\s+(.+)/i;
+            // Edit Image
+            const editRegex = /^(edit|img|تعديل|عدل|بدل|غيّر)(\s+ال)?(\s+صورة|image|foto)?\s+(.+)/i;
+            // Stories
+            const storyRegex = /^(story|riwaya|hikaya|قصة|رواية|حكاية)/i;
+
+            if (musicRegex.test(rawText)) {
+                command = 'play';
+                args = rawText.match(musicRegex)[2].split(' ');
+            } else if (quranRegex.test(rawText)) {
+                command = 'quran';
+                args = rawText.match(quranRegex)[2].split(' ');
+            } else if (drawRegex.test(rawText)) {
+                command = 'imagine';
+                args = rawText.match(drawRegex)[3].split(' ');
+            } else if (editRegex.test(rawText) && (imageUrl || userImageSession[sender_psid])) {
+                command = 'img';
+                args = rawText.match(editRegex)[4].split(' ');
+            } else if (storyRegex.test(rawText)) {
+                command = 'riwaya';
+            } else if (videoRegex.test(rawText)) {
+                command = 'yts'; // Or handle video DL directly
+                args = rawText.match(videoRegex)[2].split(' ');
+            }
+        }
 
         // --- IMAGE EDITING (.img) ---
         // Support: Caption OR Reply/Sequential
@@ -187,24 +222,7 @@ async function handleMessage(sender_psid, received_message) {
             return sendAttachmentAPI(sender_psid, 'image', finalUrl, `✅ *Edited Image:* ${prompt}\nBy ${OWNER_NAME}`);
         }
 
-        // --- AUTO IMAGE ---
-        const imageKeywords = ["ارسم", "صورة", "image", "draw", "picture", "رسم", "انشيء لي", "ولد لي"];
-        const isImageRequest = imageKeywords.some(k => rawText.includes(k)) && !text.startsWith('.');
 
-        if (isImageRequest) {
-            let prompt = text.replace(/ارسم لي|صورة|اريد|انشيء لي|ولد لي|image|draw|picture/gi, '').trim();
-            if (prompt.length > 1) {
-                console.log(chalk.yellow(`[DEBUG] Triggering AI Image for: ${prompt}`));
-                callSendAPI(sender_psid, { text: `🎨 *جاري رسم:* ${prompt}...` });
-
-                // Translate/Enhance prompt
-                prompt = await improveImagePrompt(sender_psid, prompt);
-                console.log(chalk.cyan(`[DEBUG] Enhanced Prompt: ${prompt}`));
-
-                const imgUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?nologo=true&enhance=true&seed=${Math.floor(Math.random() * 1000000)}`;
-                return sendAttachmentAPI(sender_psid, 'image', imgUrl, `✅ ${prompt}\nBy ${OWNER_NAME}`);
-            }
-        }
 
         // YouTube Auto-Detection (JUST a link)
         const ytPattern = /(?:https?:\/\/)?(?:www\.)?(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/))([a-zA-Z0-9_-]{11})/;
