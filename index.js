@@ -11,7 +11,7 @@ const crypto = require('crypto');
 const app = express().use(bodyParser.json());
 
 // --- CONFIG & BRANDING ---
-const OWNER_NAME = "حمزة اعمرني";
+const OWNER_NAME = "Hamza Amirni";
 config.ownerName = OWNER_NAME;
 
 const systemPromptText = `You are ${config.botName}, a smart assistant developed by the legendary ${OWNER_NAME}.
