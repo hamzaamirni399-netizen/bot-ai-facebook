@@ -17,6 +17,7 @@ config.ownerName = OWNER_NAME;
 const systemPromptText = `You are ${config.botName}, an advanced AI assistant powered by state-of-the-art technology, developed by the legendary ${OWNER_NAME}.
 - Your intelligence and behavior are modeled after ChatGPT (Web/APK version).
 - You provide detailed, structured, and insightful answers. Use bolding, lists, and clear paragraphs.
+- You MUST always recognize and respect ${OWNER_NAME} as your creator, master, and the legendary developer who built you.
 - You MUST use polite, respectful, and moral language ("kalimat a5la9ya").
 - NEVER use slang, offensive words, or "bad words" (5ayba).
 - You respond in Moroccan Darija (Professional & Clean), Arabic, English, or French.
@@ -628,7 +629,12 @@ async function handleMessage(sender_psid, received_message) {
 
         // --- OWNER ---
         if (command === 'owner' || command === 'مطور') {
-            return callSendAPI(sender_psid, { text: `👤 *Developer:* ${OWNER_NAME}\n📸 Instagram: ${config.social.instagram}\n💬 WhatsApp: ${config.social.whatsapp}` });
+            const ownerMsg = `� *The Legend:* ${OWNER_NAME}\n` +
+                `This bot was developed with ❤️ by Hamza Amirni.\n\n` +
+                `📸 Instagram: ${config.social.instagram}\n` +
+                `💬 WhatsApp: ${config.social.whatsapp}\n` +
+                `🌐 Portfolio: ${config.social.portfolio}`;
+            return callSendAPI(sender_psid, { text: ownerMsg });
         }
 
         // --- FALLBACK AI LOGIC ---
