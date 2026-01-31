@@ -1,0 +1,16 @@
+// Helper function for Quick Replies (Facebook Native Feature)
+function sendQuickReplies(sender_psid, text, quickReplies) {
+    const formattedReplies = quickReplies.map(qr => ({
+        content_type: "text",
+        title: qr.title,
+        payload: qr.payload
+    }));
+    
+    return axios.post(`https://graph.facebook.com/v19.0/me/messages?access_token=${config.PAGE_ACCESS_TOKEN}`, {
+        recipient: { id: sender_psid },
+        message: {
+            text: text,
+            quick_replies: formattedReplies
+        }
+    }).catch(err => console.error(chalk.red('Error: ' + (err.response?.data?.error?.message || err.message))));
+}

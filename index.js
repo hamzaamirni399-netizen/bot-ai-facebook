@@ -347,8 +347,9 @@ async function handleMessage(sender_psid, received_message) {
             }
         }
 
+        // --- MENU (with Quick Replies) ---
         if (['menu', 'help', 'الاوامر', 'دليل', 'المنيو'].includes(command)) {
-            const menu = `🌟 *قائمة أوامر ${config.botName}* 🌟\n\n` +
+            const menuText = `🌟 *قائمة أوامر ${config.botName}* 🌟\n\n` +
                 `🤖 *ذكاء اصطناعي ذكي:* \n` +
                 `يمكنك التحدث مع البوت بشكل طبيعي! لا تحتاج دائماً لكتابة النقطة (.)\n` +
                 `- مثال: *play tflow* (بدل .play)\n` +
@@ -362,15 +363,28 @@ async function handleMessage(sender_psid, received_message) {
 
                 `📜 *الأوامر التقليدية:*\n` +
                 `🎵 *.play [song]* : تحميل أغاني\n` +
-                `� *.imagine [text]* : رسم بالذكاء الاصطناعي\n` +
+                `🎨 *.imagine [text]* : رسم بالذكاء الاصطناعي\n` +
                 `🎬 *.ytmp4 [link]* : تحميل فيديو\n` +
                 `🕌 *.quran [name]* : قراءة القرآن\n` +
                 `🎧 *.quranmp3 [name]* : استماع للقرآن\n` +
-                `� *.riwaya* : قصص وروايات\n\n` +
+                `📚 *.riwaya* : قصص وروايات\n\n` +
+
+                `🎮 *ترفيه:*\n` +
+                `😂 *.joke* : نكتة\n` +
+                `💡 *.quote* : حكمة\n` +
+                `🎲 *.dice* : رمي الزهر\n` +
+                `🎭 *.truthordare* : صراحة أو جرأة\n\n` +
 
                 `👑 *المطور:* ${OWNER_NAME}\n` +
                 `📸 Insta: @hamza_amirni_01`;
-            return callSendAPI(sender_psid, { text: menu });
+
+            // Send with Quick Reply buttons
+            return sendQuickReplies(sender_psid, menuText, [
+                { title: "🎵 Play", payload: ".play" },
+                { title: "🎨 Imagine", payload: ".imagine" },
+                { title: "😂 Joke", payload: ".joke" },
+                { title: "🕌 Quran", payload: ".quran" }
+            ]);
         }
 
         // --- QU'RAN ---
