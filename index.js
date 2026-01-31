@@ -144,13 +144,23 @@ async function getGeminiResponse(senderId, text, imageUrl = null) {
     if (!config.geminiApiKey) return null;
     try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${config.geminiApiKey}`;
-        const contents = [{ parts: [{ text: systemPromptText + "\n\nUser: " + text }] }];
+
+        const userPart = { text: systemPromptText + "\n\nUser: " + (text || "Describe this image") };
+        const parts = [userPart];
+
         if (imageUrl) {
             const imageRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
-            contents[0].parts.push({ inline_data: { mime_type: "image/jpeg", data: Buffer.from(imageRes.data).toString("base64") } });
+            parts.push({ inline_data: { mime_type: "image/jpeg", data: Buffer.from(imageRes.data).toString("base64") } });
         }
+
+        const contents = [{ parts: parts }];
+
         const res = await axios.post(url, { contents }, { timeout: 15000 });
-    } catch (e) { return null; }
+        return res.data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
+    } catch (e) {
+        console.error("Gemini Error:", e.response?.data || e.message);
+        return null;
+    }
 }
 
 async function describeImage(imageUrl) {
