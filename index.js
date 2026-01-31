@@ -432,7 +432,7 @@ async function handleMessage(sender_psid, received_message) {
                 callSendAPI(sender_psid, { text: `⏳ جاري معالجة: *${video.title}*...` });
                 const res = await downloader.download(video.url, 'mp3');
                 if (res.status) {
-                    return sendAttachmentAPI(sender_psid, 'audio', res.result.download, `✅ *${video.title}*\nBy ${OWNER_NAME}`);
+                    return sendAttachmentAPI(sender_psid, 'audio', res.result.download, `✅ *${video.title}*\\nBy ${OWNER_NAME}`);
                 }
                 return callSendAPI(sender_psid, { text: "❌ فشل تحميل الصوت." });
             } catch (e) { return callSendAPI(sender_psid, { text: "❌ حدث خطأ." }); }
