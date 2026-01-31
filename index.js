@@ -26,8 +26,12 @@ const systemPromptText = `You are ${config.botName}, a smart assistant developed
   5. *.quran [surah]*: Read Quran.
   6. *.quranmp3 [surah]*: Listen to Quran.
   7. *.riwaya*: Read stories (Arabic/Darija).
-  8. Auto-detects YouTube links to download them.
-  9. Auto-detects "draw/رسم" to generate images.`;
+  8. *.weather [city]*: Get weather info (e.g., .weather Rabat).
+  9. *.salat [city]*: Get prayer times (e.g., .salat Casablanca).
+  10. *.img [edit]*: Edit images with AI.
+  11. *.joke* / *.quote*: Fun commands.
+  12. Auto-detects YouTube links to download them.
+  13. Auto-detects "draw/رسم" to generate images.`;
 
 // Temporary Session Memory for Stories & Images
 const userStorySession = {};
@@ -243,6 +247,10 @@ async function handleMessage(sender_psid, received_message) {
             const drawRegex = /^(imagine|draw|image|رسم|ارسم|صورة|تخيل|انشيء)(\s+لي)?\s+(.+)/i;
             // Edit Image (Flexible)
             const editRegex = /^(?:dir|sawb|baghi|bghit|momkin)?\s*(?:edit|img|تعديل|عدل|بدل|غيّر)\s*(?:lya|lia)?\s*(?:al|el)?\s*(?:sura|tswira|image|photo|background|bg)?\s*(.+)/i;
+            // Weather
+            const weatherRegex = /^(weather|meteo|طقس|الطقس)(\s+(.+))?/i;
+            // Prayer Times
+            const prayerRegex = /^(salat|prayer|صلاة|الصلاة|أوقات|awkat)(\s+(.+))?/i;
             // Stories
             const storyRegex = /^(story|riwaya|hikaya|قصة|رواية|حكاية)/i;
 
@@ -268,6 +276,14 @@ async function handleMessage(sender_psid, received_message) {
                     // Let's just grab the last element.
                     args = (matches[matches.length - 1] || "").split(' ');
                 }
+            } else if (weatherRegex.test(rawText)) {
+                command = 'weather';
+                const match = rawText.match(weatherRegex);
+                args = match[3] ? match[3].split(' ') : [];
+            } else if (prayerRegex.test(rawText)) {
+                command = 'salat';
+                const match = rawText.match(prayerRegex);
+                args = match[3] ? match[3].split(' ') : [];
             } else if (storyRegex.test(rawText)) {
                 command = 'riwaya';
             } else if (videoRegex.test(rawText)) {
@@ -327,7 +343,40 @@ async function handleMessage(sender_psid, received_message) {
             }
         }
 
+        // --- WEATHER ---
+        if (command === 'weather' || command === 'طقس' || command === 'meteo') {
+            const city = args.join(' ') || 'Casablanca';
+            try {
+                const { data } = await axios.get(`https://wttr.in/${encodeURIComponent(city)}?format=j1`);
+                const current = data.current_condition[0];
+                const weather = `🌤️ *الطقس في ${city}*\\n\\n` +
+                    `🌡️ الحرارة: ${current.temp_C}°C\\n` +
+                    `💨 الرياح: ${current.windspeedKmph} km/h\\n` +
+                    `💧 الرطوبة: ${current.humidity}%\\n` +
+                    `☁️ الوصف: ${current.weatherDesc[0].value}`;
+                return callSendAPI(sender_psid, { text: weather });
+            } catch (e) {
+                return callSendAPI(sender_psid, { text: "❌ تعذر الحصول على معلومات الطقس." });
+            }
+        }
 
+        // --- PRAYER TIMES ---
+        if (command === 'salat' || command === 'صلاة' || command === 'prayer') {
+            const city = args.join(' ') || 'Casablanca';
+            try {
+                const { data } = await axios.get(`https://api.aladhan.com/v1/timingsByCity?city=${encodeURIComponent(city)}&country=Morocco&method=3`);
+                const timings = data.data.timings;
+                const prayerTimes = `🕌 *أوقات الصلاة - ${city}*\\n\\n` +
+                    `🌅 الفجر: ${timings.Fajr}\\n` +
+                    `☀️ الظهر: ${timings.Dhuhr}\\n` +
+                    `🌤️ العصر: ${timings.Asr}\\n` +
+                    `🌆 المغرب: ${timings.Maghrib}\\n` +
+                    `🌙 العشاء: ${timings.Isha}`;
+                return callSendAPI(sender_psid, { text: prayerTimes });
+            } catch (e) {
+                return callSendAPI(sender_psid, { text: "❌ تعذر الحصول على أوقات الصلاة." });
+            }
+        }
 
         // --- STORY INTERACTION LOGIC ---
         if (userStorySession[sender_psid] && !isNaN(rawText)) {
@@ -369,11 +418,11 @@ async function handleMessage(sender_psid, received_message) {
                 `🎧 *.quranmp3 [name]* : استماع للقرآن\n` +
                 `📚 *.riwaya* : قصص وروايات\n\n` +
 
-                `🎮 *ترفيه:*\n` +
-                `😂 *.joke* : نكتة\n` +
-                `💡 *.quote* : حكمة\n` +
-                `🎲 *.dice* : رمي الزهر\n` +
-                `🎭 *.truthordare* : صراحة أو جرأة\n\n` +
+                `⚙️ *خدمات مفيدة:*\\n` +
+                `🌤️ *.weather [city]* : حالة الطقس\\n` +
+                `� *.salat [city]* : أوقات الصلاة\\n` +
+                `😂 *.joke* : نكتة\\n` +
+                `💡 *.quote* : حكمة\\n\\n` +
 
                 `👑 *المطور:* ${OWNER_NAME}\n` +
                 `📸 Insta: @hamza_amirni_01`;
