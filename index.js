@@ -109,6 +109,33 @@ async function getHectormanuelAI(senderId, message, model = "gpt-4o-mini", custo
     } catch (e) { return null; }
 }
 
+// --- CUSTOM OPENAI (Gemini-3-Flash) ---
+async function getCustomOpenAI(senderId, message) {
+    try {
+        const url = "http://127.0.0.1:8045/v1/chat/completions";
+        // Note: 127.0.0.1 only works if Bot is running LOCALLY.
+        // If deployed to Cloud, you must replace this with the PUBLIC URL.
+
+        const payload = {
+            model: "gemini-3-flash",
+            messages: [
+                { role: "system", content: systemPromptText },
+                { role: "user", content: message }
+            ]
+        };
+        const headers = {
+            "Authorization": "Bearer sk-ac3392fbab234649b3f6cc86a06a3044",
+            "Content-Type": "application/json"
+        };
+
+        const { data } = await axios.post(url, payload, { headers, timeout: 10000 });
+        return data.choices?.[0]?.message?.content || null;
+    } catch (e) {
+        console.error(chalk.red("[AI Error] Custom OpenAI Failed:"), e.message);
+        return null;
+    }
+}
+
 async function getGeminiResponse(senderId, text, imageUrl = null) {
     if (!config.geminiApiKey) return null;
     try {
@@ -481,7 +508,12 @@ async function handleMessage(sender_psid, received_message) {
         }
 
         // --- FALLBACK AI ---
-        let aiReply = imageUrl ? await getGeminiResponse(sender_psid, text, imageUrl) : (await getLuminAIResponse(sender_psid, text) || await getHectormanuelAI(sender_psid, text));
+        let aiReply = imageUrl ? await getGeminiResponse(sender_psid, text, imageUrl) : (
+            await getCustomOpenAI(sender_psid, text) ||
+            await getLuminAIResponse(sender_psid, text) ||
+            await getHectormanuelAI(sender_psid, text)
+        );
+
         if (!aiReply) aiReply = "Sma7 lya, mfhmtch.";
 
         sendTypingAction(sender_psid, 'typing_off');
