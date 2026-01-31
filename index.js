@@ -111,21 +111,36 @@ async function getObitoGemini(question, imageUrl) {
     try {
         if (!imageUrl) return null;
 
-        // Ensure image is publicly accessible (Upload to Catbox if it's a FB URL)
         let finalImageUrl = imageUrl;
-        if (imageUrl.includes('fbcdn.net')) {
+        if (imageUrl.includes('fbcdn.net') || imageUrl.includes('messenger.com')) {
             const uploaded = await uploadToCatbox(imageUrl);
             if (uploaded) finalImageUrl = uploaded;
         }
 
-        const encodedQuestion = encodeURIComponent(question || "Describe this image in detail. If it's a screenshot, explain it. If it has text, transcribe/explain it.");
-        const apiUrl = `https://obito-mr-apis.vercel.app/api/ai/gemini_2.5_flash?txt=${encodedQuestion}&img=${encodeURIComponent(finalImageUrl)}`;
-        const { data } = await axios.get(apiUrl, { timeout: 30000 });
-        return (data.success && data.result) ? data.result : null;
-    } catch (error) {
-        console.error(chalk.red("[Obito Error]:"), error.message);
+        const encodedQuestion = encodeURIComponent(question || "Analyze this image.");
+        // Try both 2.5 and 1.5 endpoints as they are common and one might be down
+        const endpoints = [
+            `https://obito-mr-apis.vercel.app/api/ai/gemini-pro?txt=${encodedQuestion}&img=${encodeURIComponent(finalImageUrl)}`,
+            `https://obito-mr-apis.vercel.app/api/ai/gemini_2.5_flash?txt=${encodedQuestion}&img=${encodeURIComponent(finalImageUrl)}`
+        ];
+
+        for (const url of endpoints) {
+            try {
+                const { data } = await axios.get(url, { timeout: 20000 });
+                if (data.success && data.result) return data.result;
+            } catch (e) { }
+        }
         return null;
-    }
+    } catch (error) { return null; }
+}
+
+async function getRyzendesuVision(question, imageUrl) {
+    try {
+        if (!imageUrl) return null;
+        const encodedQuestion = encodeURIComponent(question || "Analyze this image.");
+        const { data } = await axios.get(`https://api.ryzendesu.vip/api/ai/gemini-vision?url=${encodeURIComponent(imageUrl)}&text=${encodedQuestion}`, { timeout: 30000 });
+        return data.result || null;
+    } catch (e) { return null; }
 }
 
 async function uploadToCatbox(url) {
@@ -138,7 +153,7 @@ async function uploadToCatbox(url) {
 
         const { data } = await axios.post('https://catbox.moe/user/api.php', form, {
             headers: form.getHeaders(),
-            timeout: 15000
+            timeout: 20000
         });
 
         if (typeof data === 'string' && data.startsWith('https://')) {
@@ -146,10 +161,7 @@ async function uploadToCatbox(url) {
             return data;
         }
         return null;
-    } catch (e) {
-        console.error(chalk.red("[Upload Error]:"), e.message);
-        return null;
-    }
+    } catch (e) { return null; }
 }
 
 // --- AI FUNCTIONS ---
@@ -755,11 +767,19 @@ async function handleMessage(sender_psid, received_message) {
             }
             console.log(chalk.cyan(`[DEBUG] Proactive Vision triggered.`));
 
-            // Priority 1: Obito Gemini 2.5 Flash (User's preferred high-performance engine)
+            // Priority 1: Obito Gemini
             aiReply = await getObitoGemini(visionPrompt, visionContext);
 
-            // Priority 2: Official Gemini 1.5 Flash
-            if (!aiReply) aiReply = await getGeminiResponse(sender_psid, visionPrompt, visionContext);
+            // Priority 2: Ryzendesu Gemini Vision (Strong Fallback)
+            if (!aiReply) {
+                console.log(chalk.yellow(`[DEBUG] Obito Vision failed. Trying Ryzendesu...`));
+                aiReply = await getRyzendesuVision(visionPrompt, visionContext);
+            }
+
+            // Priority 3: Official Gemini 1.5 Flash (If key exists)
+            if (!aiReply && config.geminiApiKey) {
+                aiReply = await getGeminiResponse(sender_psid, visionPrompt, visionContext);
+            }
 
             // If vision engines work, we cache the description for future text-only follow-ups
             if (aiReply) userImageDescriptions[visionContext] = aiReply;
