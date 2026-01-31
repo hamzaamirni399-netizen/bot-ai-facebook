@@ -146,6 +146,20 @@ async function getMaherVision(question, imageUrl) {
     } catch (e) { return null; }
 }
 
+async function getSandipVision(question, imageUrl) {
+    try {
+        const { data } = await axios.get(`https://sandipbaruwal.onrender.com/gemini?prompt=${encodeURIComponent(question || "Describe")}&url=${encodeURIComponent(imageUrl)}`, { timeout: 20000 });
+        return data.answer || data.result || null;
+    } catch (e) { return null; }
+}
+
+async function getAlysiaVision(question, imageUrl) {
+    try {
+        const { data } = await axios.get(`https://api.alysia.my.id/api/gemini-vision?text=${encodeURIComponent(question || "Analyze")}&image=${encodeURIComponent(imageUrl)}`, { timeout: 20000 });
+        return data.result || null;
+    } catch (e) { return null; }
+}
+
 async function getPhoebeAI(message) {
     try {
         const { data } = await axios.get(`https://api.phoebe.my.id/api/chatgpt?text=${encodeURIComponent(message)}`);
@@ -799,13 +813,25 @@ async function handleMessage(sender_psid, received_message) {
                 aiReply = await getMaherVision(visionPrompt, visionContext);
             }
 
-            // Priority 4: BK9 Gemini Vision
+            // Priority 4: Sandip Baruwal (Stable)
             if (!aiReply) {
-                console.log(chalk.yellow(`[DEBUG] Maher failed. Trying BK9...`));
+                console.log(chalk.yellow(`[DEBUG] Maher failed. Trying Sandip...`));
+                aiReply = await getSandipVision(visionPrompt, visionContext);
+            }
+
+            // Priority 5: BK9 Gemini Vision
+            if (!aiReply) {
+                console.log(chalk.yellow(`[DEBUG] Sandip failed. Trying BK9...`));
                 aiReply = await getBK9Vision(visionPrompt, visionContext);
             }
 
-            // Priority 5: Official Gemini 1.5 Flash (If key exists)
+            // Priority 6: Alysia Vision
+            if (!aiReply) {
+                console.log(chalk.yellow(`[DEBUG] BK9 failed. Trying Alysia...`));
+                aiReply = await getAlysiaVision(visionPrompt, visionContext);
+            }
+
+            // Priority 7: Official Gemini 1.5 Flash (If key exists)
             if (!aiReply && config.geminiApiKey) {
                 aiReply = await getGeminiResponse(sender_psid, visionPrompt, visionContext);
             }
