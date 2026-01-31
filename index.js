@@ -33,9 +33,10 @@ const systemPromptText = `You are ${config.botName}, a smart assistant developed
   12. Auto-detects YouTube links to download them.
   13. Auto-detects "draw/رسم" to generate images.`;
 
-// Temporary Session Memory for Stories & Images
+// Temporary Session Memory for Stories, Images & Context
 const userStorySession = {};
 const userImageSession = {};
+const userChatHistory = {}; // Store last few messages for context
 
 const surahMap = {
     "fatiha": 1, "fati7a": 1, "الفاتحة": 1, "baqara": 2, "baqarah": 2, "البقرة": 2, "imran": 3, "آل عمران": 3, "nisa": 4, "النساء": 4, "maida": 5, "المائدة": 5, "anam": 6, "الأنعام": 6, "araf": 7, "الأعراف": 7, "anfal": 8, "الأنفال": 8, "tawba": 9, "التوبة": 9, "yunus": 10, "يونس": 10, "hud": 11, "هود": 11, "yusuf": 12, "يوسف": 12, "rad": 13, "الرعد": 13, "ibrahim": 14, "إبراهيم": 14, "hijr": 15, "الحجر": 15, "nahl": 16, "النحل": 16, "isra": 17, "الإسراء": 17, "kahf": 18, "الكهف": 18, "maryam": 19, "مريم": 19, "taha": 20, "طه": 20, "anbiya": 21, "الأنبياء": 21, "hajj": 22, "الحج": 22, "muminun": 23, "المؤمنون": 23, "nur": 24, "النور": 24, "furqan": 25, "الفرقان": 25, "shuara": 26, "الشعراء": 26, "naml": 27, "النمل": 27, "qasas": 28, "القصص": 28, "ankabut": 29, "العنكبوت": 29, "rum": 30, "الروم": 30, "luqman": 31, "لقمان": 31, "sajda": 32, "السجدة": 32, "ahzab": 33, "الأحزاب": 33, "saba": 34, "سبأ": 34, "fatir": 35, "فاطر": 35, "yasin": 36, "يس": 36, "saffat": 37, "الصافات": 37, "sad": 38, "ص": 38, "zumar": 39, "الزمر": 39, "ghafir": 40, "غافر": 40, "fussilat": 41, "فصلت": 41, "shura": 42, "الشورى": 42, "zukhruf": 43, "الزخرف": 43, "dukhan": 44, "الدخان": 44, "jathiya": 45, "الجاثية": 45, "ahqaf": 46, "الأحقاف": 46, "muhammad": 47, "محمد": 47, "fath": 48, "الفتح": 48, "hujurat": 49, "الحجرات": 49, "qaf": 50, "ق": 50, "dhariyat": 51, "الذاريات": 51, "tur": 52, "الطور": 52, "najm": 53, "النجم": 53, "qamar": 54, "القمر": 54, "rahman": 55, "الرحمن": 55, "waqia": 56, "الواقعة": 56, "hadid": 57, "الحديد": 57, "mujadila": 58, "المجادلة": 58, "hashr": 59, "الحشر": 59, "mumtahana": 60, "الممتحنة": 60, "saff": 61, "الصف": 61, "juma": 62, "الجمعة": 62, "munafiqun": 63, "المنافقون": 63, "taghabun": 64, "التغابن": 64, "talaq": 65, "الطلاق": 65, "tahrim": 66, "التحريم": 66, "mulk": 67, "الملك": 67, "qalam": 68, "القلم": 68, "haqqa": 69, "الحاقة": 69, "maarij": 70, "المعارج": 70, "nuh": 71, "نوح": 71, "jinn": 72, "الجن": 72, "muzzammil": 73, "المزمل": 73, "muddathir": 74, "المدثر": 74, "qiyama": 75, "القيامة": 75, "insan": 76, "الإنسان": 76, "mursalat": 77, "المرسلات": 77, "naba": 78, "النبأ": 78, "naziat": 79, "النازعات": 79, "abasa": 80, "عبس": 80, "takwir": 81, "التكوير": 81, "infitar": 82, "الانفطار": 82, "mutaffifin": 83, "المطفيين": 83, "inshiqaq": 84, "الانشقاق": 84, "buruj": 85, "البروج": 85, "tariq": 86, "الطارق": 86, "ala": 87, "الأعلى": 87, "ghashiya": 88, "الغاشية": 88, "fajr": 89, "الفجر": 89, "balad": 90, "البلد": 90, "shams": 91, "الشمس": 91, "layl": 92, "الليل": 92, "duha": 93, "الضحى": 93, "sharh": 94, "الشرح": 94, "tin": 95, "التين": 95, "alaq": 96, "العلق": 96, "qadr": 97, "القدر": 97, "bayyina": 98, "البينة": 98, "zalzala": 99, "الزلزلة": 99, "adiyat": 100, "العاديات": 100, "qaria": 101, "القارعة": 101, "takathur": 102, "التكاثر": 102, "asr": 103, "العصر": 103, "humaza": 104, "الهمزة": 104, "fil": 105, "الفيل": 105, "quraysh": 106, "قريش": 106, "maun": 107, "الماعون": 107, "kawthar": 108, "الكوثر": 108, "kafirun": 109, "الكافرون": 109, "nasr": 110, "النصر": 110, "masad": 111, "المسد": 111, "ikhlas": 112, "الإخلاص": 112, "falaq": 113, "الفلق": 113, "nas": 114, "الناس": 114
@@ -107,8 +108,12 @@ async function getLuminAIResponse(senderId, message) {
 
 async function getHectormanuelAI(senderId, message, model = "gpt-4o-mini", customSystemPrompt = null) {
     try {
+        const history = userChatHistory[senderId] || [];
+        const context = history.map(h => `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.content}`).join('\n');
         const sys = customSystemPrompt !== null ? customSystemPrompt : systemPromptText;
-        const { data } = await axios.get(`https://all-in-1-ais.officialhectormanuel.workers.dev/?query=${encodeURIComponent(sys + "\n\nUser: " + message)}&model=${model}`, { timeout: 8000 });
+        const fullPrompt = `${sys}\n\nContext:\n${context}\n\nUser: ${message}`;
+
+        const { data } = await axios.get(`https://all-in-1-ais.officialhectormanuel.workers.dev/?query=${encodeURIComponent(fullPrompt)}&model=${model}`, { timeout: 8000 });
         return data.success ? data.message?.content : null;
     } catch (e) { return null; }
 }
@@ -117,15 +122,17 @@ async function getHectormanuelAI(senderId, message, model = "gpt-4o-mini", custo
 async function getCustomOpenAI(senderId, message) {
     try {
         const url = "http://127.0.0.1:8045/v1/chat/completions";
-        // Note: 127.0.0.1 only works if Bot is running LOCALLY.
-        // If deployed to Cloud, you must replace this with the PUBLIC URL.
+
+        const history = userChatHistory[senderId] || [];
+        const messages = [
+            { role: "system", content: systemPromptText },
+            ...history,
+            { role: "user", content: message }
+        ];
 
         const payload = {
             model: "gemini-2.5-flash",
-            messages: [
-                { role: "system", content: systemPromptText },
-                { role: "user", content: message }
-            ]
+            messages: messages
         };
         const headers = {
             "Authorization": "Bearer sk-ac3392fbab234649b3f6cc86a06a3044",
@@ -145,15 +152,25 @@ async function getGeminiResponse(senderId, text, imageUrl = null) {
     try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${config.geminiApiKey}`;
 
-        const userPart = { text: systemPromptText + "\n\nUser: " + (text || "Describe this image") };
-        const parts = [userPart];
+        const history = userChatHistory[senderId] || [];
+        const contents = [{ role: "user", parts: [{ text: systemPromptText }] }]; // System instruction as first user turn if system_instruction not supported in this endpoint version easily
+
+        history.forEach(h => {
+            contents.push({
+                role: h.role === 'user' ? 'user' : 'model',
+                parts: [{ text: h.content }]
+            });
+        });
+
+        const userPart = { text: text || "Describe this image" };
+        const currentParts = [userPart];
 
         if (imageUrl) {
             const imageRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
-            parts.push({ inline_data: { mime_type: "image/jpeg", data: Buffer.from(imageRes.data).toString("base64") } });
+            currentParts.push({ inline_data: { mime_type: "image/jpeg", data: Buffer.from(imageRes.data).toString("base64") } });
         }
 
-        const contents = [{ parts: parts }];
+        contents.push({ role: "user", parts: currentParts });
 
         const res = await axios.post(url, { contents }, { timeout: 15000 });
         return res.data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
@@ -588,6 +605,12 @@ async function handleMessage(sender_psid, received_message) {
         );
 
         if (!aiReply) aiReply = "Sma7 lya, mfhmtch.";
+
+        // Update History
+        if (!userChatHistory[sender_psid]) userChatHistory[sender_psid] = [];
+        userChatHistory[sender_psid].push({ role: 'user', content: text });
+        userChatHistory[sender_psid].push({ role: 'assistant', content: aiReply });
+        if (userChatHistory[sender_psid].length > 10) userChatHistory[sender_psid] = userChatHistory[sender_psid].slice(-10);
 
         sendTypingAction(sender_psid, 'typing_off');
         callSendAPI(sender_psid, { text: aiReply });
