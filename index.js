@@ -43,6 +43,7 @@ const systemPromptText = `You are ${config.botName}, an advanced AI assistant po
 // Temporary Session Memory for Stories, Images & Context
 const userStorySession = {};
 const userImageSession = {};
+const userImageDescriptions = {}; // Cache for Gemini descriptions
 const userChatHistory = {}; // Store last few messages for context
 
 const surahMap = {
@@ -279,12 +280,20 @@ async function handleMessage(sender_psid, received_message) {
         let visionContext = imageUrl;
         if (!visionContext && userImageSession[sender_psid]) {
             const replyToImg = received_message.reply_to;
-            const hasRefWords = (rawText.includes('hadi') || rawText.includes('tswira') || rawText.includes('photo') || rawText.includes('image') || rawText.includes('hnaya') || rawText.includes('hona'));
+            const hasRefWords = (rawText.includes('hadi') || rawText.includes('tswira') || rawText.includes('photo') || rawText.includes('image') || rawText.includes('hnaya') || rawText.includes('hona') || rawText.includes('flaphot'));
             if (replyToImg || hasRefWords) {
                 visionContext = userImageSession[sender_psid];
                 console.log(chalk.yellow(`[DEBUG] Using session image as context (Ref/Reply detected)`));
             }
         }
+
+        // Cache image description for fallbacks if Gemini is not on cooldown
+        if (visionContext && !userImageDescriptions[visionContext] && Date.now() >= geminiCooldownUntil) {
+            console.log(chalk.cyan(`[DEBUG] Fetching description for context...`));
+            const desc = await describeImage(visionContext);
+            if (desc) userImageDescriptions[visionContext] = desc;
+        }
+        const cachedDesc = visionContext ? userImageDescriptions[visionContext] : null;
 
         console.log(chalk.blue(`[MSG] ${sender_psid}: ${text}`));
         sendTypingAction(sender_psid, 'typing_on');
@@ -643,11 +652,16 @@ async function handleMessage(sender_psid, received_message) {
         // Try Gemini first (Vision support)
         aiReply = await getGeminiResponse(sender_psid, text, visionContext);
 
-        // If Gemini fails or no image, try fallbacks for text
+        // If Gemini fails or no image, try fallbacks for text (with cached vision context if available)
         if (!aiReply) {
-            aiReply = await getHectormanuelAI(sender_psid, text) ||
-                await getLuminAIResponse(sender_psid, text) ||
-                await getCustomOpenAI(sender_psid, text);
+            let contextPrompt = text;
+            if (cachedDesc && (visionContext || rawText.includes('sura') || rawText.includes('image') || rawText.includes('photo') || rawText.includes('tsira') || rawText.includes('hadi'))) {
+                contextPrompt = `(Context: The user is looking at a photo you previously described as: "${cachedDesc}").\n\nUser Question: ${text}`;
+                console.log(chalk.cyan(`[DEBUG] Enriched fallback prompt with cached vision description.`));
+            }
+            aiReply = await getHectormanuelAI(sender_psid, contextPrompt) ||
+                await getLuminAIResponse(sender_psid, contextPrompt) ||
+                await getCustomOpenAI(sender_psid, contextPrompt);
         }
 
         if (!aiReply) {
