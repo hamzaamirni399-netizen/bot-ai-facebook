@@ -7,6 +7,7 @@ const yts = require('yt-search');
 const fs = require('fs-extra');
 const path = require('path');
 const crypto = require('crypto');
+const FormData = require('form-data');
 
 const app = express().use(bodyParser.json());
 
@@ -109,11 +110,46 @@ async function getQuranSurahText(surahInput) {
 async function getObitoGemini(question, imageUrl) {
     try {
         if (!imageUrl) return null;
-        const encodedQuestion = encodeURIComponent(question || "Describe this image in detail.");
-        const apiUrl = `https://obito-mr-apis.vercel.app/api/ai/gemini_2.5_flash?txt=${encodedQuestion}&img=${encodeURIComponent(imageUrl)}`;
-        const { data } = await axios.get(apiUrl, { timeout: 20000 });
+
+        // Ensure image is publicly accessible (Upload to Catbox if it's a FB URL)
+        let finalImageUrl = imageUrl;
+        if (imageUrl.includes('fbcdn.net')) {
+            const uploaded = await uploadToCatbox(imageUrl);
+            if (uploaded) finalImageUrl = uploaded;
+        }
+
+        const encodedQuestion = encodeURIComponent(question || "Describe this image in detail. If it's a screenshot, explain it. If it has text, transcribe/explain it.");
+        const apiUrl = `https://obito-mr-apis.vercel.app/api/ai/gemini_2.5_flash?txt=${encodedQuestion}&img=${encodeURIComponent(finalImageUrl)}`;
+        const { data } = await axios.get(apiUrl, { timeout: 30000 });
         return (data.success && data.result) ? data.result : null;
-    } catch (error) { return null; }
+    } catch (error) {
+        console.error(chalk.red("[Obito Error]:"), error.message);
+        return null;
+    }
+}
+
+async function uploadToCatbox(url) {
+    try {
+        const response = await axios.get(url, { responseType: 'arraybuffer' });
+        const buffer = Buffer.from(response.data);
+        const form = new FormData();
+        form.append('fileToUpload', buffer, { filename: 'image.jpg' });
+        form.append('reqtype', 'fileupload');
+
+        const { data } = await axios.post('https://catbox.moe/user/api.php', form, {
+            headers: form.getHeaders(),
+            timeout: 15000
+        });
+
+        if (typeof data === 'string' && data.startsWith('https://')) {
+            console.log(chalk.green(`[DEBUG] Image uploaded to Catbox: ${data}`));
+            return data;
+        }
+        return null;
+    } catch (e) {
+        console.error(chalk.red("[Upload Error]:"), e.message);
+        return null;
+    }
 }
 
 // --- AI FUNCTIONS ---
@@ -712,8 +748,12 @@ async function handleMessage(sender_psid, received_message) {
 
         // Proactive Vision: If an image is detected or referenced, prioritize high-quality vision analysis
         if (visionContext) {
-            const visionPrompt = text || "Describe this image in detail. If it contains a question or math problem, solve it. If it's a person or object, identify it creatively. Speak in Moroccan Darija (Clean/Professional).";
-            console.log(chalk.cyan(`[DEBUG] Proactive Vision triggered for: ${visionContext.substring(0, 30)}...`));
+            let visionPrompt = text;
+            if (!visionPrompt) {
+                const isFollowUp = rawText.includes('resume') || rawText.includes('كمل') || rawText.includes('زيد') || rawText.includes('شرح');
+                visionPrompt = isFollowUp ? "Provide more deep details about this image. Explain the context, hidden details, and any text." : "Analyze this image intelligently. If it's an error, explain it. If it's a question, solve it. Speak Moroccan Darija.";
+            }
+            console.log(chalk.cyan(`[DEBUG] Proactive Vision triggered.`));
 
             // Priority 1: Obito Gemini 2.5 Flash (User's preferred high-performance engine)
             aiReply = await getObitoGemini(visionPrompt, visionContext);
@@ -727,11 +767,12 @@ async function handleMessage(sender_psid, received_message) {
 
         // Text Fallback Chain: If vision failed, or no image is involved
         if (!aiReply) {
-            let contextPrompt = text;
-            if (cachedDesc && (visionContext || rawText.includes('sura') || rawText.includes('image') || rawText.includes('photo') || rawText.includes('tsira') || rawText.includes('hadi') || rawText.includes('fiha') || rawText.includes('resume'))) {
+            let contextPrompt = text || "Hello"; // Avoid empty prompt
+            if (visionContext && !cachedDesc) {
+                contextPrompt = `[SYSTEM]: Image analysis failed. User says: "${text || 'Tell me about this image'}". Task: Apologize and say you can't see the image clearly right now, then offer other help.`;
+            } else if (cachedDesc) {
                 const imgAnalysis = `[IMAGE CONTEXT]: The user is asking about an image they sent previously. DESCRIPTION: "${cachedDesc}".`;
                 contextPrompt = `${imgAnalysis}\n\nTask: Answer the user's question as if you can see the image clearly.\nUser Question: "${text || 'Resume analysis'}"`;
-                console.log(chalk.cyan(`[DEBUG] Using Vision Cache for text-only query.`));
             }
 
             // Normal AI Fallback Rotation
