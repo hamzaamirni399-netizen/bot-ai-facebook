@@ -88,7 +88,6 @@ const downloader = {
 };
 
 // --- QURAN TEXT ---
-// --- QURAN TEXT ---
 async function getQuranSurahText(surahInput) {
     let num = parseInt(surahInput);
     if (isNaN(num)) num = surahMap[surahInput.toLowerCase().replace(/\s+/g, '')];
@@ -105,6 +104,16 @@ async function getQuranSurahText(surahInput) {
             };
         }
     } catch (e) { return null; }
+}
+
+async function getObitoGemini(question, imageUrl) {
+    try {
+        if (!imageUrl) return null;
+        const encodedQuestion = encodeURIComponent(question || "Describe this image in detail.");
+        const apiUrl = `https://obito-mr-apis.vercel.app/api/ai/gemini_2.5_flash?txt=${encodedQuestion}&img=${encodeURIComponent(imageUrl)}`;
+        const { data } = await axios.get(apiUrl, { timeout: 20000 });
+        return (data.success && data.result) ? data.result : null;
+    } catch (error) { return null; }
 }
 
 // --- AI FUNCTIONS ---
@@ -140,7 +149,7 @@ async function getCustomOpenAI(senderId, message) {
         ];
 
         const payload = {
-            model: "gemini-2.5-flash",
+            model: "gemini-1.5-flash",
             messages: messages
         };
         const headers = {
@@ -150,10 +159,21 @@ async function getCustomOpenAI(senderId, message) {
 
         const { data } = await axios.post(url, payload, { headers, timeout: 10000 });
         return data.choices?.[0]?.message?.content || null;
-    } catch (e) {
-        console.error(chalk.red("[AI Error] Custom OpenAI Failed:"), e.message);
-        return null;
-    }
+    } catch (e) { return null; }
+}
+
+async function getAichatResponse(senderId, message) {
+    try {
+        const { data } = await axios.get(`https://api.ryzendesu.vip/api/ai/chatgpt?text=${encodeURIComponent(systemPromptText + "\n\nUser: " + message)}`);
+        return data.response || null;
+    } catch (e) { return null; }
+}
+
+async function getVyturexAI(message) {
+    try {
+        const { data } = await axios.get(`https://api.vyturex.com/openai?query=${encodeURIComponent(message)}`);
+        return data.response || null;
+    } catch (e) { return null; }
 }
 
 let geminiCooldownUntil = 0;
@@ -162,7 +182,7 @@ async function getGeminiResponse(senderId, text, imageUrl = null) {
     if (!config.geminiApiKey) return null;
     if (Date.now() < geminiCooldownUntil) return null;
     try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${config.geminiApiKey}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${config.geminiApiKey}`;
 
         const history = userChatHistory[senderId] || [];
         const payload = {
@@ -213,7 +233,7 @@ async function getGeminiResponse(senderId, text, imageUrl = null) {
 async function describeImage(imageUrl) {
     if (!config.geminiApiKey) return null;
     try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${config.geminiApiKey}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${config.geminiApiKey}`;
         const imageRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
         const payload = {
             contents: [{
@@ -286,16 +306,29 @@ async function handleMessage(sender_psid, received_message) {
         if (received_message.attachments && received_message.attachments[0].type === 'image') {
             imageUrl = received_message.attachments[0].payload.url;
             userImageSession[sender_psid] = imageUrl; // Save for session
+
+            // Facebook specific: If it's a standalone image, wait a bit to see if text follows in next event
+            if (!text) {
+                console.log(chalk.yellow(`[DEBUG] Image received without text. Waiting 1.5s for potential caption...`));
+                await delay(1500);
+                // Check if user sent a text message in the meantime (stored in history or handled by another instance)
+                // For simplicity in this architecture, we rely on the next message triggering handleMessage again.
+                // But we can improve visionContext to always look at the last uploaded image.
+            }
         }
 
         // Vision context: current image OR session image if user is replying/referencing
         let visionContext = imageUrl;
         if (!visionContext && userImageSession[sender_psid]) {
+            const history = userChatHistory[sender_psid] || [];
+            const lastMsgWasImage = history.length > 0 && history[history.length - 1].isImage;
             const replyToImg = received_message.reply_to;
-            const hasRefWords = (rawText.includes('hadi') || rawText.includes('tswira') || rawText.includes('photo') || rawText.includes('image') || rawText.includes('hnaya') || rawText.includes('hona') || rawText.includes('flaphot') || rawText.includes('resume') || rawText.includes('كمل') || rawText.includes('زيد'));
-            if (replyToImg || hasRefWords) {
+            const hasRefWords = (rawText.includes('hadi') || rawText.includes('tswira') || rawText.includes('photo') || rawText.includes('image') || rawText.includes('hnaya') || rawText.includes('hona') || rawText.includes('f-hadi') || rawText.includes('resume') || rawText.includes('كمل') || rawText.includes('زيد') || rawText.includes('شرح') || rawText.includes('حلل') || rawText.includes('باش') || rawText.includes('فيها'));
+
+            // If user just sent an image followed by text, or uses reference words, link them.
+            if (replyToImg || hasRefWords || lastMsgWasImage) {
                 visionContext = userImageSession[sender_psid];
-                console.log(chalk.yellow(`[DEBUG] Using session image as context (Ref/Reply/Resume detected)`));
+                console.log(chalk.yellow(`[DEBUG] Linking text to previous image context (Sequential/Ref/Reply)`));
             }
         }
 
@@ -304,63 +337,80 @@ async function handleMessage(sender_psid, received_message) {
         console.log(chalk.blue(`[MSG] ${sender_psid}: ${text}`));
         sendTypingAction(sender_psid, 'typing_on');
 
-        let command = rawText.split(' ')[0].startsWith('.') ? rawText.split(' ')[0].substring(1) : "";
-        let args = text.split(' ').slice(1);
+        let command = "";
+        let args = [];
+        if (rawText.startsWith('.')) {
+            const keywords = ['quranmp3', 'quran', 'imagine', 'play', 'weather', 'salat', 'ytmp3', 'ytmp4', 'yts', 'riwaya', 'clear', 'owner', 'menu', 'help', 'img', 'edit', 'analyze', 'gemini'];
+            const matchedKeyword = keywords.find(k => rawText.startsWith(`.${k}`));
+            if (matchedKeyword) {
+                command = matchedKeyword;
+                let remainder = text.substring(matchedKeyword.length + 1).trim();
+                if (remainder.startsWith('[') && remainder.endsWith(']')) {
+                    remainder = remainder.substring(1, remainder.length - 1);
+                }
+                args = remainder ? remainder.split(/\s+/) : [];
+            } else {
+                // Fallback for unknown .commands
+                command = rawText.split(' ')[0].substring(1);
+                args = text.split(' ').slice(1);
+            }
+        }
 
         // --- SMART INTENT ROUTER (Natural Language) ---
         if (!command) {
             // Music/Audio
-            const musicRegex = /^(play|music|song|أغنية|اغنية|موسيقى|سمعني|خدم|شغل|طلاق)\s+(.+)/i;
+            const musicRegex = /(?:play|music|song|أغنية|اغنية|موسيقى|سمعني|خدم|شغل|طلاق|تحميل)\s+(?:اغنية|أغنية\s+)?(.+)/i;
             // Video
-            const videoRegex = /^(video|mp4|فيديو|telecharger|télecharger)\s+(.+)/i;
+            const videoRegex = /(?:video|mp4|فيديو|telecharger|télecharger)\s+(.+)/i;
             // Quran
-            const quranRegex = /^(quran|koran|قرآن|قران|سورة)\s+(.+)/i;
+            const quranRegex = /(?:quran|koran|قرآن|قران|سورة)\s+(.+)/i;
             // Imagine/Draw
-            const drawRegex = /^(imagine|draw|image|رسم|ارسم|صورة|تخيل|انشيء)(\s+لي)?\s+(.+)/i;
-            // Edit Image (Flexible) - Added 3dl, n3dl, gad, sawab, bdel
-            const editRegex = /^(?:dir|sawb|baghi|bghit|momkin)?\s*(?:edit|img|تعديل|عدل|بدل|غيّر|3dl|n3dl|gad|soweb|bdel)\s*(?:lya|lia)?\s*(?:al|el)?\s*(?:sura|tswira|image|photo|background|bg)?\s*(.+)/i;
+            const drawRegex = /(?:imagine|draw|image|رسم|ارسم|صورة|صور|تخيل|انشيء|صمم|رسمي|طيني)\s*(?:لي|ليا|ليا\s+صورة|صورة\s+لي)?\s+(.+)/i;
+            // Edit Image (Flexible)
+            const editRegex = /(?:edit|img|تعديل|عدل|بدل|غيّر|3dl|n3dl|gad|soweb|bdel|7oli|improve|enhance|تحسين|جودة|quality|حول|تحويل|rje3|rje3ni|ردني)\s*(?:ilya|lia|lya|lea)?\s*(?:al|el|l-|la)?\s*(?:sura|tswira|image|photo|background|bg|portrait)?\s*(.+)/i;
             // Weather
-            const weatherRegex = /^(weather|meteo|طقس|الطقس)(\s+(.+))?/i;
+            const weatherRegex = /(?:weather|meteo|طقس|الطقس|حالة\s+الجو|شتا|فيه\s+شتا|واش\s+شتا)\s*(?:في|فـ|بـ|f|fi|bi)?\s*(.+)/i;
             // Prayer Times
-            const prayerRegex = /^(salat|prayer|صلاة|الصلاة|أوقات|awkat)(\s+(.+))?/i;
+            const prayerRegex = /(?:salat|prayer|صلاة|الصلاة|أوقات|اوقات|awkat|w9t|wa9t|fo9ach)\s*(?:n-salat|l-salat|salat|الصلاة)?\s*(?:في|f|fi)?\s*(.+)/i;
+            // Vision Analysis (New)
+            const analyzeRegex = /(?:analyze|gemini-pro|حلل|شرح|فسر|gemini|gemini-pro|جيميني-حلل)\s*(.+)?/i;
             // Stories
-            const storyRegex = /^(story|riwaya|hikaya|قصة|رواية|حكاية)/i;
+            const storyRegex = /(?:story|riwaya|hikaya|قصة|رواية|حكاية)/i;
 
             if (musicRegex.test(rawText)) {
                 command = 'play';
-                args = rawText.match(musicRegex)[2].split(' ');
+                const match = rawText.match(musicRegex);
+                args = match[match.length - 1].split(' ');
             } else if (quranRegex.test(rawText)) {
                 command = 'quran';
-                args = rawText.match(quranRegex)[2].split(' ');
+                args = rawText.match(quranRegex)[1].split(' ');
             } else if (drawRegex.test(rawText)) {
                 command = 'imagine';
-                args = rawText.match(drawRegex)[3].split(' ');
+                const match = rawText.match(drawRegex);
+                args = match[match.length - 1].split(' ');
             } else if (editRegex.test(rawText)) {
-                // Check if we have an image in session OR attachment
                 if (imageUrl || userImageSession[sender_psid]) {
                     command = 'img';
-                    // The regex group matching the prompt is likely at the end.
-                    // Match result: [full, prefix?, command, ..., prompt]
-                    // Let's use a simpler specific cleaner closer to the command handler.
-                    // For now, extract the last group which is (.+)
                     const matches = rawText.match(editRegex);
-                    // The last group is the prompt. Length varies based on optional groups.
-                    // Let's just grab the last element.
                     args = (matches[matches.length - 1] || "").split(' ');
                 }
+            } else if (analyzeRegex.test(rawText)) {
+                command = 'analyze';
+                const match = rawText.match(analyzeRegex);
+                args = match[1] ? match[1].split(' ') : [];
             } else if (weatherRegex.test(rawText)) {
                 command = 'weather';
                 const match = rawText.match(weatherRegex);
-                args = match[3] ? match[3].split(' ') : [];
+                args = match[1] ? match[1].split(' ') : [];
             } else if (prayerRegex.test(rawText)) {
                 command = 'salat';
                 const match = rawText.match(prayerRegex);
-                args = match[3] ? match[3].split(' ') : [];
+                args = match[1] ? match[1].split(' ') : [];
             } else if (storyRegex.test(rawText)) {
                 command = 'riwaya';
             } else if (videoRegex.test(rawText)) {
-                command = 'yts'; // Or handle video DL directly
-                args = rawText.match(videoRegex)[2].split(' ');
+                command = 'yts';
+                args = rawText.match(videoRegex)[1].split(' ');
             }
         }
 
@@ -400,18 +450,23 @@ async function handleMessage(sender_psid, received_message) {
 
 
 
-        // YouTube Auto-Detection (JUST a link)
-        const ytPattern = /(?:https?:\/\/)?(?:www\.)?(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/))([a-zA-Z0-9_-]{11})/;
-        if (ytPattern.test(text.trim()) && !text.startsWith('.')) {
-            console.log(chalk.yellow(`[DEBUG] YT Link Auto-Detected`));
-            callSendAPI(sender_psid, { text: "🔗 YouTube Link detected! Please wait..." });
-            callSendAPI(sender_psid, { text: "🔗 YouTube Link detected! Please wait..." });
-            const res = await downloader.download(text.trim(), '720');
-            if (res.status) {
-                return sendAttachmentAPI(sender_psid, 'video', res.result.download, `✅ *${res.result.title}*\nBy ${OWNER_NAME}`);
-            } else {
-                return callSendAPI(sender_psid, { text: "❌ فشل تحميل الفيديو. حاول مرة أخرى برابط آخر." });
+        // --- VISION ANALYSIS COMMAND ---
+        if (command === 'analyze' || command === 'gemini' || command === 'حلل') {
+            const question = args.join(' ') || "Describe this image in detail.";
+            const targetImage = visionContext;
+            if (!targetImage) return callSendAPI(sender_psid, { text: "❌ Please send an image first or reply to one." });
+
+            callSendAPI(sender_psid, { text: "� *جاري تحليل الصورة باستخدام Gemini 2.5 Flash...*" });
+            const analysis = await getObitoGemini(question, targetImage);
+            if (analysis) {
+                // Update history with this context
+                if (!userChatHistory[sender_psid]) userChatHistory[sender_psid] = [];
+                userChatHistory[sender_psid].push({ role: 'user', content: `[Image Analysis Request]: ${question}` });
+                userChatHistory[sender_psid].push({ role: 'assistant', content: analysis });
+                userImageDescriptions[targetImage] = analysis; // Cache it
+                return callSendAPI(sender_psid, { text: `*⎔ ⋅ ───━ •﹝🤖 تحليل جيميني ﹞• ━─── ⋅ ⎔*\n\n${analysis}\n\n𝐎𝐁𝐈𝐓𝐎 𝐀𝐏𝐈 𝐄𝐍𝐇𝐀𝐍𝐂𝐄𝐃` });
             }
+            return callSendAPI(sender_psid, { text: "❌ Sma7 lya, error f analysis. Try again." });
         }
 
         // --- WEATHER ---
@@ -652,30 +707,39 @@ async function handleMessage(sender_psid, received_message) {
             return callSendAPI(sender_psid, { text: ownerMsg });
         }
 
-        // --- FALLBACK AI LOGIC ---
+        // --- FALLBACK AI LOGIC (Smart & Proactive) ---
         let aiReply = null;
 
-        // Try Gemini first (Vision support)
-        aiReply = await getGeminiResponse(sender_psid, text, visionContext);
+        // Proactive Vision: If an image is detected or referenced, prioritize high-quality vision analysis
+        if (visionContext) {
+            const visionPrompt = text || "Describe this image in detail. If it contains a question or math problem, solve it. If it's a person or object, identify it creatively. Speak in Moroccan Darija (Clean/Professional).";
+            console.log(chalk.cyan(`[DEBUG] Proactive Vision triggered for: ${visionContext.substring(0, 30)}...`));
 
-        // If Gemini fails or no image, try fallbacks for text (with cached vision context if available)
+            // Priority 1: Obito Gemini 2.5 Flash (User's preferred high-performance engine)
+            aiReply = await getObitoGemini(visionPrompt, visionContext);
+
+            // Priority 2: Official Gemini 1.5 Flash
+            if (!aiReply) aiReply = await getGeminiResponse(sender_psid, visionPrompt, visionContext);
+
+            // If vision engines work, we cache the description for future text-only follow-ups
+            if (aiReply) userImageDescriptions[visionContext] = aiReply;
+        }
+
+        // Text Fallback Chain: If vision failed, or no image is involved
         if (!aiReply) {
             let contextPrompt = text;
             if (cachedDesc && (visionContext || rawText.includes('sura') || rawText.includes('image') || rawText.includes('photo') || rawText.includes('tsira') || rawText.includes('hadi') || rawText.includes('fiha') || rawText.includes('resume'))) {
-                const imgAnalysis = `[IMPORTANT SYSTEM MESSAGE]: The user is asking about a specific image. DESCRIPTION: "${cachedDesc}".`;
-                const userQuery = text ? `USER QUESTION: "${text}"` : "ACTION: Describe the image or solve any problem shown in it.";
-                contextPrompt = `${imgAnalysis}\n\nTask: You are the bot's brain. Use the description to answer AS IF YOU CAN SEE IT. Don't be generic. If the user says 'resume', give more details about the image.\n${userQuery}`;
-                console.log(chalk.cyan(`[DEBUG] Enriched fallback prompt with detailed vision cache.`));
-            } else if (visionContext && !cachedDesc && Date.now() < geminiCooldownUntil) {
-                // Vision is needed but Gemini is down and we don't have a cached description
-                aiReply = "Sma7 lya, Gemini quota t-salat o m9ertech n-chouf tswira jadida. Men ba3d 10 min aw hdar m3aya bla tswira.";
+                const imgAnalysis = `[IMAGE CONTEXT]: The user is asking about an image they sent previously. DESCRIPTION: "${cachedDesc}".`;
+                contextPrompt = `${imgAnalysis}\n\nTask: Answer the user's question as if you can see the image clearly.\nUser Question: "${text || 'Resume analysis'}"`;
+                console.log(chalk.cyan(`[DEBUG] Using Vision Cache for text-only query.`));
             }
 
-            if (!aiReply) {
-                aiReply = await getHectormanuelAI(sender_psid, contextPrompt) ||
-                    await getLuminAIResponse(sender_psid, contextPrompt) ||
-                    await getCustomOpenAI(sender_psid, contextPrompt);
-            }
+            // Normal AI Fallback Rotation
+            aiReply = await getHectormanuelAI(sender_psid, contextPrompt) ||
+                await getLuminAIResponse(sender_psid, contextPrompt) ||
+                await getAichatResponse(sender_psid, contextPrompt) ||
+                await getVyturexAI(contextPrompt) ||
+                await getCustomOpenAI(sender_psid, contextPrompt);
         }
 
         if (!aiReply) {
@@ -690,7 +754,7 @@ async function handleMessage(sender_psid, received_message) {
 
         // Update History
         if (!userChatHistory[sender_psid]) userChatHistory[sender_psid] = [];
-        userChatHistory[sender_psid].push({ role: 'user', content: text });
+        userChatHistory[sender_psid].push({ role: 'user', content: text, isImage: !!imageUrl });
         userChatHistory[sender_psid].push({ role: 'assistant', content: aiReply });
         if (userChatHistory[sender_psid].length > 10) userChatHistory[sender_psid] = userChatHistory[sender_psid].slice(-10);
 
@@ -700,6 +764,23 @@ async function handleMessage(sender_psid, received_message) {
         console.error(chalk.red("[FATAL ERROR]:"), error);
         sendTypingAction(sender_psid, 'typing_off');
     }
+}
+
+// Helper function for Quick Replies (Facebook Native Feature)
+function sendQuickReplies(sender_psid, text, quickReplies) {
+    const formattedReplies = quickReplies.map(qr => ({
+        content_type: "text",
+        title: qr.title,
+        payload: qr.payload
+    }));
+
+    return axios.post(`https://graph.facebook.com/v19.0/me/messages?access_token=${config.PAGE_ACCESS_TOKEN}`, {
+        recipient: { id: sender_psid },
+        message: {
+            text: text,
+            quick_replies: formattedReplies
+        }
+    }).catch(err => console.error(chalk.red('Error: ' + (err.response?.data?.error?.message || err.message))));
 }
 
 function sendTypingAction(sender_psid, action) {
